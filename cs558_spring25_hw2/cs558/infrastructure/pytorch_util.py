@@ -16,38 +16,40 @@ _str_to_activation = {
     'identity': nn.Identity(),
 }
 
-
 def build_mlp(
         input_size: int,
         output_size: int,
         n_layers: int,
         size: int,
-        activation: Activation = 'tanh',
-        output_activation: Activation = 'identity',
+        activation: nn.Module = nn.Tanh(),
+        output_activation: nn.Module = nn.Identity(),
 ) -> nn.Module:
     """
-        Builds a feedforward neural network
+    Builds a feedforward neural network (MLP)
 
-        arguments:
-            n_layers: number of hidden layers
-            size: dimension of each hidden layer
-            activation: activation of each hidden layer
+    :param input_size: Number of input features
+    :param output_size: Number of output features
+    :param n_layers: Number of hidden layers
+    :param size: Number of neurons in each hidden layer
+    :param activation: Activation function for hidden layers
+    :param output_activation: Activation function for output layer
 
-            input_size: size of the input layer
-            output_size: size of the output layer
-            output_activation: activation of the output layer
-
-        returns:
-            MLP (nn.Module)
+    :return: A PyTorch Sequential model representing the MLP.
     """
-    if isinstance(activation, str):
-        activation = _str_to_activation[activation]
-    if isinstance(output_activation, str):
-        output_activation = _str_to_activation[output_activation]
+    layers = []
+    in_size = input_size
 
-    # TODO: return a MLP. This should be an instance of nn.Module  [OK]
-    # Note: nn.Sequential is an instance of nn.Module.
-    raise NotImplementedError
+    # Create hidden layers
+    for _ in range(n_layers):
+        layers.append(nn.Linear(in_size, size))  # Fully connected layer
+        layers.append(activation)  # Activation function
+        in_size = size  # Next layer input size
+
+    # Output layer
+    layers.append(nn.Linear(in_size, output_size))
+    layers.append(output_activation)  # Apply final activation function
+
+    return nn.Sequential(*layers)  # Return as a PyTorch Sequential model
 
 
 device = None

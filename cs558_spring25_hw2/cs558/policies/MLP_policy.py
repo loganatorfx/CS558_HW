@@ -75,15 +75,31 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     ##################################
 
     def get_action(self, obs: np.ndarray) -> np.ndarray:
+        # Ensure obs is a batch (even if it's a single sample)
         if len(obs.shape) > 1:
             observation = obs
         else:
-            observation = obs[None]
+            observation = obs[None]  # Add batch dimension
+        
+        # Convert to PyTorch tensor and move to GPU (if available)
+        observation = ptu.from_numpy(observation)
 
-        # TODO return the action that the policy prescribes
-        # Note that the default policy above defines parameters for both mean and variance.
-        # It is up to you whether you want to use both to sample actions (recommended) or just the mean.
-        raise NotImplementedError
+        # Compute mean action from the network
+        mean_action = self.mean_net(observation)
+
+        # Sample from a Gaussian distribution if policy is stochastic
+        if not self.discrete:
+            std = torch.exp(self.logstd)  # Convert log std to std
+            action_distribution = torch.distributions.Normal(mean_action, std)
+            action = action_distribution.sample()  # Sample an action
+        else:
+            # Discrete case: use softmax to sample an action
+            action_distribution = torch.distributions.Categorical(logits=self.logits_na(observation))
+            action = action_distribution.sample()
+
+        # Convert action to numpy and return
+        return ptu.to_numpy(action)
+
 
     # update/train this policy
     def update(self, observations, actions, **kwargs):
@@ -95,7 +111,19 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     # return more flexible objects, such as a
     # `torch.distributions.Distribution` object. It's up to you!
     def forward(self, observation: torch.FloatTensor) -> Any:
-        raise NotImplementedError
+        # Convert NumPy array to PyTorch tensor if necessary
+        if isinstance(observation, np.ndarray):
+            observation = ptu.from_numpy(observation)  # Convert using helper function
+
+        mean_action = self.mean_net(observation)  # Now it's guaranteed to be a tensor
+
+        if self.discrete:
+            action_distribution = torch.distributions.Categorical(logits=self.logits_na(observation))
+        else:
+            std = torch.exp(self.logstd)
+            action_distribution = torch.distributions.Normal(mean_action, std)
+
+        return action_distribution
 
 
 #####################################################
@@ -106,15 +134,37 @@ class MLPPolicySL(MLPPolicy):
         super().__init__(ac_dim, ob_dim, n_layers, size, **kwargs)
         self.loss = nn.MSELoss()
 
-    def update(
-            self, observations, actions,
-            adv_n=None, acs_labels_na=None, qvals=None
-    ):
-        # TODO: update the policy and return the loss
-        # Note that you do not have to use MSELoss (defined in init), and in fact it may be preferable to use something else if you are trying to learn both the mean and variance.
-        loss = TODO
+    def update(self, observations, actions, adv_n=None, acs_labels_na=None, qvals=None):
+        """
+        Updates the policy by computing loss and performing backpropagation.
+        """
+        # Forward pass – Get predicted action distribution
+        action_distribution = self.forward(observations)
+
+        # Extract the mean action
+        if isinstance(action_distribution, torch.distributions.Normal):
+            predicted_actions = action_distribution.mean
+        else:
+            predicted_actions = action_distribution
+
+        # # Debugging prints
+        # print(f"predicted_actions type: {type(predicted_actions)}, shape: {predicted_actions.shape}")
+        # print(f"actions type: {type(actions)}, shape: {actions.shape}")
+
+        # Ensure actions is a torch tensor
+        if isinstance(actions, np.ndarray):
+            actions = ptu.from_numpy(actions)
+        
+        # Compute loss
+        loss = self.loss(predicted_actions, actions)
+        
+
+        # Backpropagation
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
         return {
-            # You can add extra logging information here, but keep this line
             'Training Loss': ptu.to_numpy(loss),
         }
+
